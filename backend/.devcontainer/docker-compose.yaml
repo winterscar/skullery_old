@@ -1,0 +1,19 @@
+version: '3'
+services:
+  db:
+    container_name: skullery-db
+    ports:
+    - "25432:5432"
+    image: postgres:13-alpine
+    environment: 
+      POSTGRES_PASSWORD: skullery
+  backend:
+    container_name: skullery-backend
+    image: clojure:openjdk-14-tools-deps-alpine
+    volumes:
+      - ..:/app
+    command: /bin/sh -c "while sleep 1000; do :; done"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db

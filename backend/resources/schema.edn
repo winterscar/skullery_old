@@ -1,0 +1,56 @@
+{:objects
+;  -----
+ {:Product
+  {:description "An abstract ingredient, as you would find in a recipe."
+   :fields
+   {:id               {:type (non-null Int)}
+    :name             {:type (non-null String)}
+    :default_location {:type (non-null :Location)
+                       :resolve :Product/Location}
+    :unit             {:type    (non-null :Unit)
+                       :resolve :Product/Unit}
+    :variants         {:type    (list :Variant)
+                       :resolve :Product/Variant}}}
+;  -----
+  :Location
+  {:description "The place where stock is found."
+   :fields
+   {:id          {:type (non-null Int)}
+    :name        {:type (non-null String)}}}
+;  -----
+  :Variant
+  {:description "The concrete instance of a Product. Often times a brand version."
+   :fields
+   {:id          {:type    (non-null Int)}
+    :name        {:type    (non-null String)}
+    :parent      {:type    (non-null :Product)
+                  :resolve :Variant/Product}
+    :unit        {:type    (non-null :Unit)
+                  :resolve :Variant/Unit}
+    :conversions {:type    (non-null (list :Conversion))
+                  :resolve :Variant/Conversion}}}
+;  -----
+  :Unit
+  {:description "A fixed amount of something, e.g. An onion, a can of Pepsi."
+   :fields
+   {:id           {:type (non-null Int)}
+    :singular     {:type (non-null String)}
+    :plural       {:type (non-null String)}}}
+;  -----
+  :Conversion
+  {:description "Describes the conversion from 'from' to 'to' by multiplying by
+                 'value'."
+   :fields
+   {:from   {:type (non-null :Unit)
+             :resolve :Conversion/FromUnit}
+    :to     {:type (non-null :Unit)
+             :resolve :Conversion/ToUnit}
+    :factor {:type (non-null Float)}}}}
+;  -----
+ :queries
+ {:products
+  {:type (list :Product)
+   :description "Select a product by its unique ID if it exists, or all products."
+   :args
+   {:id {:type Int :default-value nil}}
+   :resolve :Product}}}
