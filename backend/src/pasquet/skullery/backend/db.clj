@@ -3,7 +3,7 @@
    [com.stuartsierra.component :as component]
    [clojure.java.jdbc :as jdbc]
    [honeysql.core :as sql]
-   [honeysql.helpers :refer :all]
+   [honeysql.helpers :refer [select merge-join where merge-where from insert-into values]]
    [honeysql-postgres.format :refer :all]
    [honeysql-postgres.helpers :as psqlh])
   (:import (com.mchange.v2.c3p0 ComboPooledDataSource)))
@@ -36,37 +36,85 @@
   []
   {:db (map->SkulleryDb {})})
 
+(defn query   [q {db :ds}] (println (sql/format q)) (->> (sql/format q) (jdbc/query db)))
+(defn execute [q {db :ds}] (->> (sql/format q) (jdbc/execute! db)))
 
-(defn list->single
-  [list] (if (= 1 (count list)) (first list) list))
+;; -------------- Products -------------------------------------------------------------------------
 
-(defn query   [{db :ds} q] (->> (sql/format q) (jdbc/query db)))
-(defn execute [{db :ds} q]
-  (println (sql/format q))
-  (->> (sql/format q) (jdbc/execute! db)))
+(defn map-product
+  [p]
+  {:id (:prod_id p)
+   :name (:prod_name p)
+   :default_location {:id (:loc_id p) :name (:loc_name p)}
+   :unit {:id (:unit_id p) :singular (:unit p) :plural (:units p) :si (:u_si p)}})
 
-(defn from-db
-  "Fetch value(s) from the database table 'table'.
-  Filter key value pairs will act as where clauses. eg. {:id 0} -> where id = 0."
-  [db filters table]
-  (let [q (as-> (select :*) k
-            (reduce (fn [q f] (merge-where q [:= (key f) (val f)])) k filters)
-            (from k table))
-        result (query db q)]
-    (list->single result)))
+(defn get-products
+  ([db id]
+   (-> (select [:p.id :prod_id] [:p.name :prod_name]
+               [:u.id :unit_id] [:u.singular :unit] [:u.plural :units] [:u.si :u_si]
+               [:l.name :loc_name] [:l.id :loc_id])
+       (from [:products :p])
+       (merge-join [:locations :l] [:= :p.location :l.id])
+       (merge-join [:units :u] [:= :p.unit :u.id])
+       (cond-> id (where [:= :p.id id]))
+       (query db)
+       (->> (map map-product))
+       (cond-> id first)))
+  ([db]
+   (get-products db nil)))
 
+
+;; -------------------------------------------------------------------------------------------------
+
+;; ------ Variants ---------------------------------------------------------------------------------
+
+(defn map-variant
+  [v]
+  {:id (:id v)
+   :name (:name v)
+   :unit {:id (:unit_id v) :singular (:unit v) :plural (:units v) :si (:u_si v)}})
+
+(defn get-variants
+  [db parent]
+  (-> (select [:v.name :name] [:v.id :id]
+              [:u.id :unit_id] [:u.singular :unit] [:u.plural :units] [:u.si :u_si])
+      (from [:variants :v])
+      (where [:= :product parent])
+      (merge-join [:units :u] [:= :v.unit :u.id])
+      (query db)
+      (->> (map map-variant))))
+
+;; -------------------------------------------------------------------------------------------------
+
+;; ------ Conversions ------------------------------------------------------------------------------
+
+(defn map-conversion
+  [c]
+  {:a {:id       (:a c)
+       :singular (:ua_singular c)
+       :plural   (:ua_plural   c)
+       :si       (:ua_si       c)}
+   :b {:id       (:b c)
+       :singular (:ub_singular c)
+       :plural   (:ub_plural   c)
+       :si       (:ub_si       c)}
+   :a_amount (:a_amount c)
+   :b_amount (:b_amount c)})
 
 (defn get-conversions
-  [db product unit]
-  (let [q (-> (select :*)
-              (from :conversions)
-              (where [:and [:or [:= :a unit] [:= :b unit]]
-                      [:= :product product]]))
-        r (query db q)]
-    r))
+  [db unit]
+  (-> (select [:c.a :a] [:c.b :b] [:c.a_amount :a_amount] [:c.b_amount :b_amount]
+              [:ua.singular :ua_singular] [:ua.plural :ua_plural] [:ua.si :ua_si]
+              [:ub.singular :ub_singular] [:ub.plural :ub_plural] [:ub.si :ub_si])
+      (from [:conversions :c])
+      (where [:or [:= :a unit] [:= :b unit]])
+      (merge-join [:units :ua] [:= :a :ua.id])
+      (merge-join [:units :ub] [:= :b :ub.id])
+      (query db)
+      (->> (map map-conversion))))
 
 (defn cleanup-conversions
-  "Remove 2-way conversions and simplify fractions."
+  "Simplify fractions."
   [])
 
 (defn integrate-node
@@ -152,11 +200,6 @@
   ([{:keys [:a :b :a_amount :b_amount]} product conversions]
    "This override will re-build the connections for an existing node, without attempting to re-add the existing edge to the graph. Useful when joining two separate graphs."
    (:connect-others->node (integrate-node b a b_amount a_amount product conversions))))
-
-(comment 
-  {:insert-into
-   [[conversions [:product :a :b :a_amount :b_amount]]
-    {:union-all [node<-anchor->other node<-anchor<-other]}]})
   
   (defn edges-of
     "Returns a SQL query that selects all the edges of a specific node.
@@ -182,8 +225,8 @@
         ;; are finally joined together you may be attempting to merge together two graphs.
         ;; In the interest of speed, we want to connect the smaller graph to the bigger one.
         ;; We'll call the small graph secs, and the large graph prims.
-        get-a-edges   (query db (edges-of unit-a product conversions))
-        get-b-edges   (query db (edges-of unit-b product conversions))
+        get-a-edges   (query (edges-of unit-a product conversions) db)
+        get-b-edges   (query (edges-of unit-b product conversions) db)
         [secs prims]  (sort-by count [get-a-edges get-b-edges])
         ;; Now we know which side is larger, we'll take the a and b units we got in as 
         ;; args and bind them to sec and prim, representing the joining nodes on each
@@ -195,8 +238,11 @@
         ;; get the SQL we need to rebuild the secs graph. This may be an empty list if
         ;; secs was a single node. (Most of the time it will be).
         rebuild-secs (map #(integrate-node % product conversions) secs)]
-    (doseq [q (vals prim->sec)] (execute db q))
-    (doseq [edge rebuild-secs] (execute db edge))
+    (doseq [q (vals prim->sec)] (execute q db))
+    (doseq [edge rebuild-secs] (execute edge db))
     ;; The insert process can get a little messy... Fractions are not simplified, and duplicate 
     ;; paths may be created 
     (cleanup-conversions)))
+
+
+;; -------------------------------------------------------------------------------------------------

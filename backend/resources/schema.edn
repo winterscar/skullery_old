@@ -5,11 +5,9 @@
    :fields
    {:id               {:type (non-null Int)}
     :name             {:type (non-null String)}
-    :default_location {:type (non-null :Location)
-                       :resolve :Product/Location}
-    :unit             {:type    (non-null :Unit)
-                       :resolve :Product/Unit}
-    :variants         {:type    (list :Variant)
+    :default_location {:type (non-null :Location)}
+    :unit             {:type (non-null :Unit)}
+    :variants         {:type (list :Variant)
                        :resolve :Product/Variant}}}
 ;  -----
   :Location
@@ -25,8 +23,7 @@
     :name        {:type    (non-null String)}
     :parent      {:type    (non-null :Product)
                   :resolve :Variant/Product}
-    :unit        {:type    (non-null :Unit)
-                  :resolve :Variant/Unit}
+    :unit        {:type    (non-null :Unit)}
     :conversions {:type    (non-null (list :Conversion))
                   :resolve :Variant/Conversion}}}
 ;  -----
@@ -35,17 +32,17 @@
    :fields
    {:id           {:type (non-null Int)}
     :singular     {:type (non-null String)}
-    :plural       {:type (non-null String)}}}
+    :plural       {:type (non-null String)}
+    :si           {:type String}}}
 ;  -----
   :Conversion
   {:description "Describes the conversion from 'from' to 'to' by multiplying by
                  'value'."
    :fields
-   {:from   {:type (non-null :Unit)
-             :resolve :Conversion/FromUnit}
-    :to     {:type (non-null :Unit)
-             :resolve :Conversion/ToUnit}
-    :factor {:type (non-null Float)}}}}
+   {:a        {:type (non-null :Unit)}
+    :b        {:type (non-null :Unit)}
+    :a_amount {:type (non-null Int)}
+    :b_amount {:type (non-null Int)}}}}
 ;  -----
  :queries
  {:products
